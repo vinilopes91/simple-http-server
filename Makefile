@@ -1,4 +1,4 @@
-TARGET=main.exe
+TARGET=http-server
 CC=gcc
 DEBUG=-g
 OPT=-O0
