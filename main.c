@@ -7,23 +7,38 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include "dqueue.h"
 
 #define BUFFER_SIZE 4096
 #define SERVER_PORT 80
+#define THREAD_POOL_SIZE 20
 
-void *connection_handler(void *);
-
+void *thread_handler(void *arg);
+void connection_handler(int socket_desc);
 void send_file(int client, int fd);
-
 void send_headers(int client);
-
 void bad_request(int client);
-
 void file_not_found(int client);
+
+pthread_t thread_pool[THREAD_POOL_SIZE];
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int main()
 {
-    int server_socket, *new_sock;
+    int server_socket;
+    Queue *qu;
+
+    qu = queue_create();
+
+    if (qu == NULL)
+    {
+        exit(1);
+    }
+
+    for (int i = 0; i < THREAD_POOL_SIZE; i++)
+    {
+        pthread_create(&thread_pool[i], NULL, thread_handler, (void *)qu);
+    }
 
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -63,20 +78,88 @@ int main()
             continue;
         }
 
-        pthread_t worker_thread;
-		new_sock = malloc(sizeof(int));
-		*new_sock = client_socket;
-
-        if( pthread_create(&worker_thread, NULL, connection_handler, (void*) new_sock) < 0)
-		{
-			perror("could not create thread");
-            close(server_socket);
-			return 1;
-		}
+        pthread_mutex_lock(&mutex);
+        queue_push(qu, client_socket);
+        pthread_mutex_unlock(&mutex);
     }
+
     close(server_socket);
+    queue_free(qu);
 
     return 0;
+}
+
+void *thread_handler(void *arg)
+{
+    int client_socket;
+    Queue *qu = (Queue *)arg;
+    while (1)
+    {
+        client_socket = 0;
+        pthread_mutex_lock(&mutex);
+        queue_pop(qu, &client_socket);
+        pthread_mutex_unlock(&mutex);
+
+        if (client_socket)
+        {
+            connection_handler(client_socket);
+        }
+
+    }
+}
+
+void connection_handler(int socket_desc)
+{
+    char client_message[BUFFER_SIZE];
+    int received_characters = 0;
+
+    received_characters = recv(socket_desc, client_message, BUFFER_SIZE, 0);
+
+    if (received_characters < 1)
+    {
+        printf("Fail reading request\n");
+        close(socket_desc);
+        return;
+    }
+
+    printf("%s", client_message);
+
+    char *method, *filename;
+    method = strtok(client_message, " ");
+    filename = strtok(NULL, " ") + 1;
+
+    if (strcmp(method, "GET") != 0)
+    {
+        bad_request(socket_desc);
+        close(socket_desc);
+        return;
+    }
+
+    int fp = open(filename, O_RDONLY);
+
+    if (fp < 0)
+    {
+        file_not_found(socket_desc);
+        close(socket_desc);
+        return;
+    }
+
+    send_headers(socket_desc);
+    send_file(socket_desc, fp);
+
+    close(socket_desc);
+
+    return;
+}
+
+void send_headers(int client)
+{
+    char buffer[1024];
+
+    strcpy(buffer, "HTTP/1.1 200 OK\r\n");
+    send(client, buffer, strlen(buffer), 0);
+    strcpy(buffer, "\r\n");
+    send(client, buffer, strlen(buffer), 0);
 }
 
 void send_file(int client, int fd)
@@ -95,61 +178,6 @@ void send_file(int client, int fd)
     } while (bytes_read > 0);
 
     close(fd);
-}
-
-void *connection_handler(void *socket_desc)
-{
-    int sock = *(int *)socket_desc;
-    char client_message[BUFFER_SIZE];
-    int received_characters = 0;
-
-    received_characters = recv(sock, client_message, BUFFER_SIZE, 0);
-
-    if (received_characters < 1)
-    {
-        printf("Fail reading request\n");
-        close(sock);
-        return NULL;
-    }
-
-    printf("%s", client_message);
-
-    char *method, *filename;
-    method = strtok(client_message, " ");
-    filename = strtok(NULL, " ") + 1;
-
-    if (strcmp(method, "GET") != 0)
-    {
-        bad_request(sock);
-        close(sock);
-        return NULL;
-    }
-
-    int fp = open(filename, O_RDONLY);
-
-    if (fp < 0)
-    {
-        file_not_found(sock);
-        close(sock);
-        return NULL;
-    }
-
-    send_headers(sock);
-    send_file(sock, fp);
-
-    close(sock);
-
-    return NULL;
-}
-
-void send_headers(int client)
-{
-    char buffer[1024];
-
-    strcpy(buffer, "HTTP/1.1 200 OK\r\n");
-    send(client, buffer, strlen(buffer), 0);
-    strcpy(buffer, "\r\n");
-    send(client, buffer, strlen(buffer), 0);
 }
 
 void bad_request(int client)
