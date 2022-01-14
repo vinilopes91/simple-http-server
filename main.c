@@ -11,7 +11,7 @@
 
 #define BUFFER_SIZE 4096
 #define SERVER_PORT 80
-#define THREAD_POOL_SIZE 40
+#define THREAD_POOL_SIZE 20
 
 void *thread_handler(void *arg);
 void connection_handler(int socket_desc);
