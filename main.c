@@ -11,7 +11,7 @@
 
 #define BUFFER_SIZE 4096
 #define SERVER_PORT 80
-#define THREAD_POOL_SIZE 20
+#define THREAD_POOL_SIZE 40
 
 void *thread_handler(void *arg);
 void connection_handler(int socket_desc);
@@ -66,6 +66,8 @@ int main()
         close(server_socket);
         return 0;
     }
+
+    printf("Aguardando conexões\n\n");
 
     while (1)
     {
