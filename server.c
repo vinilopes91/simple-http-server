@@ -119,7 +119,6 @@ void connection_handler(int socket_desc)
 
     if (received_characters < 1)
     {
-        printf("Fail reading request\n");
         close(socket_desc);
         return;
     }
